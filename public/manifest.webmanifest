@@ -1,0 +1,11 @@
+{
+  "name": "Planet Bounce",
+  "short_name": "Planet Bounce",
+  "description": "Bounce from planet to planet using nothing but momentum and gravity.",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#04050d",
+  "theme_color": "#04050d",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
