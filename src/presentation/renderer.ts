@@ -7,6 +7,8 @@ import { DT, Ev } from '../physics/sim';
 import type { Settings } from '../progression/profile';
 import { Particles } from './particles';
 import { hexA, spritesFor } from './sprites';
+import { drawCelestialMotion, drawRings } from './celestial';
+import { fractal } from './terrain';
 
 const TRAIL = 160;
 
@@ -32,6 +34,14 @@ export class Renderer {
   highlightBody = -1;
   highlightUntil = 0;
   now = 0;
+  private visualTime = 0;
+  private shocks: { x: number; y: number; age: number; color: string; strength: number }[] = [];
+
+  shockwave(x: number, y: number, color: string, strength = 1): void {
+    if (this.settings().reducedEffects) return;
+    this.shocks.push({ x, y, age: 0, color, strength });
+    if (this.shocks.length > 12) this.shocks.shift();
+  }
 
   constructor(
     readonly canvas: HTMLCanvasElement,
@@ -55,19 +65,20 @@ export class Renderer {
 
   resetTrail(): void {
     this.trailLen = 0;
+    this.shocks.length = 0;
   }
 
   private buildStars(): void {
     const rng = new Rng(77);
     for (let layer = 0; layer < 3; layer++) {
       const c = document.createElement('canvas');
-      c.width = c.height = 512;
+      c.width = c.height = 1024;
       const ctx = c.getContext('2d')!;
-      const n = [140, 70, 28][layer]!;
+      const n = [330, 130, 30][layer]!;
       for (let i = 0; i < n; i++) {
-        const x = rng.range(0, 512);
-        const y = rng.range(0, 512);
-        const s = rng.range(0.4, 1.1) * (layer + 1) * 0.7;
+        const x = rng.range(0, 1024);
+        const y = rng.range(0, 1024);
+        const s = rng.range(0.3, 0.9) * (1 + layer * 0.3);
         const tint = rng.pick(['#ffffff', '#cfe0ff', '#ffe9c9', '#d9d2ff']);
         ctx.globalAlpha = rng.range(0.25, 0.9) * (0.5 + layer * 0.25);
         ctx.fillStyle = tint;
@@ -75,10 +86,17 @@ export class Renderer {
         ctx.arc(x, y, s, 0, TAU);
         ctx.fill();
         if (layer === 2 && rng.chance(0.3)) {
-          ctx.globalAlpha = 0.15;
+          ctx.globalAlpha = 0.18;
+          const halo = ctx.createRadialGradient(x, y, 0, x, y, s * 7);
+          halo.addColorStop(0, tint);
+          halo.addColorStop(1, 'transparent');
+          ctx.fillStyle = halo;
           ctx.beginPath();
-          ctx.arc(x, y, s * 4, 0, TAU);
+          ctx.arc(x, y, s * 7, 0, TAU);
           ctx.fill();
+          ctx.fillStyle = tint;
+          ctx.fillRect(x - s * 4, y - 0.3, s * 8, 0.6);
+          ctx.fillRect(x - 0.3, y - s * 4, 0.6, s * 8);
         }
       }
       this.starTiles.push(c);
@@ -88,20 +106,26 @@ export class Renderer {
   private buildNebula(regionId: string): void {
     const color = regionId === 'tutorial' ? '#5f7dff' : regionById(regionId).color;
     const c = document.createElement('canvas');
-    c.width = c.height = 256;
+    c.width = c.height = 768;
     const ctx = c.getContext('2d')!;
-    const rng = new Rng(regionId.length * 97 + 13);
-    const colors = [color, '#ff5c9a', '#4a3aff', '#1fb5c9'];
-    for (let i = 0; i < 9; i++) {
-      const x = rng.range(20, 236);
-      const y = rng.range(20, 236);
-      const r = rng.range(50, 130);
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-      g.addColorStop(0, hexA(rng.pick(colors), rng.range(0.05, 0.13)));
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, 256, 256);
+    const seed = regionId.length * 97 + 13;
+    const tint = parseInt(color.slice(1), 16);
+    const pixels = ctx.createImageData(768, 768);
+    // Dust lanes and turbulent filaments are baked once, avoiding per-frame noise work.
+    for (let y = 0; y < 768; y++) for (let x = 0; x < 768; x++) {
+      const u = x / 768, v = y / 768;
+      const n = fractal(u * 5, v * 5, 2, seed);
+      const band = Math.exp(-((v - 0.6 + Math.sin(u * 5) * 0.2 + (n - 0.5) * 0.4) ** 2) * 22);
+      const cloud = Math.max(0, n - 0.28) * band;
+      const dust = fractal(u * 14, v * 14, 5, seed + 19);
+      const density = cloud * (0.5 + dust) * 0.7;
+      const i = (y * 768 + x) * 4;
+      pixels.data[i] = 30 + (tint >> 16) * 0.22 + n * 20;
+      pixels.data[i + 1] = 44 + ((tint >> 8) & 255) * 0.28 + dust * 30;
+      pixels.data[i + 2] = 83 + (tint & 255) * 0.25;
+      pixels.data[i + 3] = density * 255;
     }
+    ctx.putImageData(pixels, 0, 0);
     this.nebula = c;
     this.nebulaRegion = regionId;
   }
@@ -112,8 +136,12 @@ export class Renderer {
     const ctx = this.ctx;
     const cam = g.camera;
     const set = this.settings();
+    const effectsDt = g.paused ? 0 : realDt;
+    if (!set.reducedEffects) this.visualTime += effectsDt;
     this.particles.budget = set.reducedEffects ? 0.35 : 1;
-    this.particles.update(realDt);
+    this.particles.update(effectsDt);
+    for (const shock of this.shocks) shock.age += effectsDt;
+    this.shocks = this.shocks.filter((shock) => shock.age < 0.85);
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     const bg = ctx.createLinearGradient(0, 0, 0, this.h);
@@ -123,7 +151,8 @@ export class Renderer {
     ctx.fillRect(0, 0, this.w, this.h);
 
     const w = g.world;
-    if (w && w.meta.regionId !== this.nebulaRegion) this.buildNebula(w.meta.regionId);
+    const region = w?.meta.regionId ?? 'tutorial';
+    if (region !== this.nebulaRegion) this.buildNebula(region);
     this.drawBackdrop(ctx);
     if (!w) return;
 
@@ -153,10 +182,18 @@ export class Renderer {
     if (g.phase === 'incident') this.drawReplay(ctx, z);
     if (g.prediction && (g.phase === 'flight' || g.aim.valid)) this.drawPrediction(ctx, z, set);
     this.drawBodies(ctx, visible, z, rt);
-    this.updateTrail(px, py, rt, g.phase === 'flight');
+    this.updateTrail(px, py, rt, g.phase === 'flight' && !g.paused);
     this.drawTrail(ctx, z, rt);
     if (g.phase !== 'incident' && g.phase !== 'loading') this.drawProbe(ctx, px, py, z, rt);
     this.particles.draw(ctx, 1.2 / z);
+    for (const shock of this.shocks) {
+      const q = shock.age / 0.85;
+      ctx.strokeStyle = hexA(shock.color, (1 - q) ** 2 * 0.7);
+      ctx.lineWidth = (1 - q) * 3 / z;
+      ctx.beginPath();
+      ctx.arc(shock.x, shock.y, (8 + (1 - (1 - q) ** 3) * 90 * shock.strength) / z, 0, TAU);
+      ctx.stroke();
+    }
 
     // Screen-space overlays.
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -170,9 +207,9 @@ export class Renderer {
   private drawBackdrop(ctx: CanvasRenderingContext2D): void {
     const cam = this.game.camera;
     if (this.nebula) {
-      const size = Math.max(this.w, this.h) * 1.8;
-      const ox = -((cam.x * 0.02) % size);
-      const oy = -((cam.y * 0.02) % size);
+      const size = Math.max(this.w, this.h) * 1.45;
+      const ox = Math.sin(cam.x * 0.0002) * 60;
+      const oy = Math.sin(cam.y * 0.0002) * 60;
       ctx.globalAlpha = 1;
       ctx.drawImage(this.nebula, this.w / 2 - size / 2 + ox * 0.5, this.h / 2 - size / 2 + oy * 0.5, size, size);
     }
@@ -180,13 +217,20 @@ export class Renderer {
     for (let l = 0; l < 3; l++) {
       const tile = this.starTiles[l]!;
       const f = factors[l]! * Math.pow(cam.zoom / 0.5, 0.3);
-      const s = 512;
+      const s = 1024;
+      ctx.globalAlpha = l === 2 ? 0.75 + Math.sin(this.visualTime * 0.55) * 0.15 : 1;
       let ox = (-(cam.x * f) % s) - s;
       let oy = (-(cam.y * f) % s) - s;
       if (ox > 0) ox -= s;
       if (oy > 0) oy -= s;
       for (let x = ox; x < this.w; x += s) for (let y = oy; y < this.h; y += s) ctx.drawImage(tile, x, y);
     }
+    ctx.globalAlpha = 1;
+    const vignette = ctx.createRadialGradient(this.w * 0.5, this.h * 0.45, this.h * 0.2, this.w * 0.5, this.h * 0.45, Math.max(this.w, this.h) * 0.7);
+    vignette.addColorStop(0, 'transparent');
+    vignette.addColorStop(1, 'rgba(1,4,15,0.65)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, this.w, this.h);
   }
 
   private drawBoundary(ctx: CanvasRenderingContext2D, z: number): void {
@@ -227,6 +271,23 @@ export class Renderer {
       ctx.arc(x, y, b.soi * 0.98, 0, TAU);
       ctx.stroke();
       ctx.setLineDash([]);
+
+      if (!reduced && (inside || g.probe.landed === b.index)) {
+        // Orbiting dust makes the currently engaged gravity well legible.
+        for (let i = 0; i < 7; i++) {
+          const a = this.visualTime * (0.12 + i * 0.008) + i * 2.4;
+          const radius = b.radius * (1.6 + (i % 3) * 0.35);
+          ctx.strokeStyle = hexA(p.glow, 0.18);
+          ctx.lineWidth = 1 / z;
+          ctx.beginPath();
+          ctx.arc(x, y, radius, a, a + 0.12);
+          ctx.stroke();
+          ctx.fillStyle = hexA(p.light, 0.55);
+          ctx.beginPath();
+          ctx.arc(x + Math.cos(a + 0.12) * radius, y + Math.sin(a + 0.12) * radius, 1.2 / z, 0, TAU);
+          ctx.fill();
+        }
+      }
 
       const beh = b.type.behavior;
       if (beh?.kind === 'pulse') {
@@ -319,7 +380,7 @@ export class Renderer {
     const g = this.game;
     const f = g.frame;
     for (const b of g.world!.bodies) {
-      if (!b.revealed || !f.active[b.index] || !visible(b, b.radius * 2)) continue;
+      if (!b.revealed || !f.active[b.index] || !visible(b, b.radius * 2.6)) continue;
       let x = f.x[b.index]!;
       let y = f.y[b.index]!;
       const sp = spritesFor(b, this.dpr);
@@ -351,6 +412,8 @@ export class Renderer {
       if (b.tags.has('secret')) {
         ctx.globalAlpha = 0.75 + 0.25 * Math.sin(t * 9);
       }
+      const ringed = b.type.style === 'banded';
+      if (ringed) drawRings(ctx, x, y, b.radius, b.type.palette.light, false);
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(b.rotationAt(t));
@@ -358,6 +421,21 @@ export class Renderer {
       ctx.restore();
       if (sp.shade) ctx.drawImage(sp.shade, x - sp.half, y - sp.half, sp.half * 2, sp.half * 2);
       ctx.globalAlpha = 1;
+      if (ringed) drawRings(ctx, x, y, b.radius, b.type.palette.light, true);
+      drawCelestialMotion(ctx, b, x, y, this.visualTime, z, this.settings().reducedEffects);
+      if (b.index === g.world!.goalBody) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(this.visualTime * 0.12);
+        ctx.strokeStyle = 'rgba(166,245,214,0.6)';
+        ctx.lineWidth = 1.5 / z;
+        for (let i = 0; i < 4; i++) {
+          ctx.beginPath();
+          ctx.arc(0, 0, b.radius + 9 / z, i * Math.PI / 2, i * Math.PI / 2 + 0.3);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
       if (crack > 0) {
         ctx.strokeStyle = `rgba(255,${Math.round(220 - crack * 120)},${Math.round(160 - crack * 120)},${0.3 + crack * 0.7})`;
         ctx.lineWidth = (1 + crack * 2) / z;
@@ -410,7 +488,7 @@ export class Renderer {
     ctx.strokeStyle = `${rgbaPrefix}${alpha})`;
     ctx.lineWidth = 2.5 / z;
     if (dashed) ctx.setLineDash([10 / z, 10 / z]);
-    ctx.lineDashOffset = -this.now * 30 / z;
+    ctx.lineDashOffset = -this.visualTime * 30 / z;
     ctx.beginPath();
     ctx.moveTo(pts[0]!, pts[1]!);
     for (let i = 1; i < count; i++) ctx.lineTo(pts[i * 2]!, pts[i * 2 + 1]!);
@@ -582,6 +660,14 @@ export class Renderer {
       ctx.moveTo(this.trailX[i0]!, this.trailY[i0]!);
       ctx.lineTo(this.trailX[i1]!, this.trailY[i1]!);
       ctx.stroke();
+      if (!this.settings().reducedEffects) {
+        ctx.strokeStyle = `rgba(100,185,255,${a * 0.09})`;
+        ctx.lineWidth = (3 + 13 * a) / z;
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(225,252,255,${a * 0.75})`;
+        ctx.lineWidth = (0.5 + a) / z;
+        ctx.stroke();
+      }
     }
     ctx.globalCompositeOperation = 'source-over';
   }
@@ -590,7 +676,7 @@ export class Renderer {
     const g = this.game;
     const s = g.probe;
     const f = g.frame;
-    const r = Math.max(g.sim.probeRadius, 4 / z);
+    const r = Math.max(g.sim.probeRadius, 6 / z);
     if (s.hookBody >= 0 && s.t < s.hookUntil) {
       ctx.strokeStyle = 'rgba(157,255,157,0.7)';
       ctx.lineWidth = 2 / z;
@@ -617,25 +703,53 @@ export class Renderer {
     ctx.arc(x, y, r * 4, 0, TAU);
     ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = '#f4fdff';
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, TAU);
-    ctx.fill();
-    // Heading tick.
     const sp = len(s.vx, s.vy);
-    if (g.phase === 'flight' && sp > 5) {
-      ctx.strokeStyle = 'rgba(40,90,140,0.9)';
-      ctx.lineWidth = r * 0.35;
+    const heading = g.aim.valid && g.phase === 'landed' ? Math.atan2(g.aim.dirY, g.aim.dirX)
+      : g.phase === 'flight' && sp > 5 ? Math.atan2(s.vy, s.vx)
+      : s.landed >= 0 ? Math.atan2(y - f.y[s.landed]!, x - f.x[s.landed]!) : -Math.PI / 2;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(heading);
+    // A compact survey craft: swept wings, ceramic hull and a cyan cockpit.
+    ctx.fillStyle = '#5c8da9';
+    ctx.beginPath();
+    ctx.moveTo(r * 0.25, 0);
+    ctx.lineTo(-r * 0.8, -r * 1.3);
+    ctx.lineTo(-r * 0.65, r * 1.3);
+    ctx.closePath();
+    ctx.fill();
+    const hull = ctx.createLinearGradient(0, -r, 0, r);
+    hull.addColorStop(0, '#ffffff');
+    hull.addColorStop(0.5, '#d7edf4');
+    hull.addColorStop(1, '#628498');
+    ctx.fillStyle = hull;
+    ctx.beginPath();
+    ctx.moveTo(r * 1.65, 0);
+    ctx.quadraticCurveTo(r * 0.2, -r * 0.9, -r, -r * 0.6);
+    ctx.lineTo(-r * 0.8, 0);
+    ctx.lineTo(-r, r * 0.6);
+    ctx.quadraticCurveTo(r * 0.2, r * 0.9, r * 1.65, 0);
+    ctx.fill();
+    ctx.fillStyle = '#1a779b';
+    ctx.beginPath();
+    ctx.ellipse(r * 0.35, 0, r * 0.47, r * 0.27, 0, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#b4ffff';
+    ctx.fillRect(-r * 1.05, -r * 0.24, r * 0.25, r * 0.48);
+    if (g.phase === 'landed') {
+      ctx.strokeStyle = 'rgba(168,233,255,0.35)';
+      ctx.lineWidth = 1 / z;
       ctx.beginPath();
-      ctx.arc(x, y, r * 0.55, Math.atan2(s.vy, s.vx) - 0.9, Math.atan2(s.vy, s.vx) + 0.9);
+      ctx.arc(0, 0, r * (2.2 + (this.settings().reducedEffects ? 0 : Math.sin(t * 2) * 0.15)), -0.6, 0.6);
       ctx.stroke();
     }
+    ctx.restore();
     // Thrust flame.
     if (s.thrustX || s.thrustY) {
       const tl = len(s.thrustX, s.thrustY);
       const fx = -s.thrustX / tl;
       const fy = -s.thrustY / tl;
-      const flick = 0.8 + Math.random() * 0.4;
+      const flick = this.settings().reducedEffects ? 1 : 1 + Math.sin(this.visualTime * 43) * 0.14;
       ctx.globalCompositeOperation = 'lighter';
       ctx.fillStyle = 'rgba(255,170,90,0.8)';
       ctx.beginPath();
@@ -647,6 +761,11 @@ export class Renderer {
     }
     // Launch direction arrow while aiming.
     if (g.aim.valid && g.phase === 'landed') {
+      ctx.strokeStyle = hexA('#b8f9da', 0.4 + g.aim.power * 0.5);
+      ctx.lineWidth = 2 / z;
+      ctx.beginPath();
+      ctx.arc(x, y, r * 2.3, -Math.PI / 2, -Math.PI / 2 + TAU * g.aim.power);
+      ctx.stroke();
       const L = (30 + 70 * g.aim.power) / z;
       const ax = x + g.aim.dirX * L;
       const ay = y + g.aim.dirY * L;

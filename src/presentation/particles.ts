@@ -107,7 +107,18 @@ export class Particles {
         const s = Math.max(minSize, this.size[i]! * (0.4 + 0.6 * t));
         ctx.globalAlpha = Math.min(1, t * 1.4);
         ctx.fillStyle = this.color[i]!;
-        ctx.fillRect(this.x[i]! - s / 2, this.y[i]! - s / 2, s, s);
+        if (pass === 1) {
+          ctx.strokeStyle = this.color[i]!;
+          ctx.lineWidth = s * 0.6;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(this.x[i]!, this.y[i]!);
+          ctx.lineTo(this.x[i]! - this.vx[i]! * 0.025, this.y[i]! - this.vy[i]! * 0.025);
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(this.x[i]!, this.y[i]!, s * 0.5, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
     ctx.globalAlpha = 1;

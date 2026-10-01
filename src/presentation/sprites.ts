@@ -1,6 +1,7 @@
 import { TAU } from '../core/math';
 import { Rng, hash2 } from '../core/rng';
 import type { Body } from '../physics/body';
+import { drawTerrain } from './terrain';
 
 /**
  * Pre-rendered celestial sprites. Each body gets a rotating "surface" sprite and a static
@@ -382,11 +383,12 @@ function drawShade(body: Body, res: number, half: number): HTMLCanvasElement | n
   ctx.beginPath();
   ctx.arc(c, c, r, 0, TAU);
   ctx.clip();
-  const sh = ctx.createRadialGradient(c + LIGHT_X * r * 0.55, c + LIGHT_Y * r * 0.55, r * 0.2, c + LIGHT_X * r * 0.3, c + LIGHT_Y * r * 0.3, r * 1.9);
+  const sh = ctx.createRadialGradient(c + LIGHT_X * r * 0.55, c + LIGHT_Y * r * 0.55, r * 0.2, c + LIGHT_X * r * 0.3, c + LIGHT_Y * r * 0.3, r * 1.45);
   sh.addColorStop(0, 'rgba(0,0,0,0)');
-  sh.addColorStop(0.45, 'rgba(0,0,8,0.05)');
-  sh.addColorStop(0.75, 'rgba(0,0,12,0.6)');
-  sh.addColorStop(1, 'rgba(0,0,16,0.88)');
+  sh.addColorStop(0.32, 'rgba(0,0,8,0.03)');
+  sh.addColorStop(0.58, 'rgba(2,5,18,0.42)');
+  sh.addColorStop(0.8, 'rgba(1,3,12,0.88)');
+  sh.addColorStop(1, 'rgba(0,0,8,0.97)');
   ctx.fillStyle = sh;
   ctx.fillRect(0, 0, size, size);
   ctx.restore();
@@ -411,13 +413,17 @@ const cache = new WeakMap<Body, BodySprites>();
 export function spritesFor(body: Body, pixelRatio: number): BodySprites {
   let s = cache.get(body);
   if (s) return s;
-  const maxPx = 440;
+  const maxPx = 640;
   const res = Math.min(pixelRatio * 1.6, maxPx / (body.radius * 2.4));
   const half = body.radius * 1.55;
   const size = half * 2 * res;
   const [surface, ctx] = canvas(size);
   const rng = new Rng(hash2(Math.round(body.x0 * 7 + body.radius), Math.round(body.y0 * 13 + body.index)));
   drawSurface(ctx, body, size / 2, body.radius * res, rng);
+  // Keep distinctive craters/facets under a fine spherical terrain layer.
+  ctx.globalAlpha = body.type.style === 'rocky' || body.type.style === 'moon' ? 0.72 : 0.9;
+  drawTerrain(ctx, body, size / 2, body.radius * res);
+  ctx.globalAlpha = 1;
   s = { surface, shade: drawShade(body, res, half), res, half };
   cache.set(body, s);
   return s;

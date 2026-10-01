@@ -29,10 +29,18 @@ npm run build      # typecheck + production build in dist/
 - **Run structure:** The Inner Belt has 3 sectors and then the Rogue Giant boss. After each sector you choose between **pushing deeper** (pick 1 of 3 run modules) and **extracting** (bank 100%). There is a Daily Expedition with a shared seed. The Shattered Moons region (binary pairs, Twin Giants boss) unlocks once the Inner Belt is complete.
 - **Progression:** 18 permanent tech nodes across 5 branches. Each tier unlocks a capability rather than a percentage, and some nodes are gated by discoveries or mastery. There are 16 run modules built around distinct archetypes, 4 physics abilities, a Cosmic Atlas, 13 mastery challenges, a journal that surfaces past memories, and lore fragments.
 - **Fair failure:** every failure shows a replay of your path, the impact point, your closest approach to the target and a concrete tip, for example "You entered its gravity well 1.3 s before impact, at 380 u/s."
-- **Onboarding:** three short hands-on lessons with no menus. If you fail the slingshot lesson, the route solver draws a golden demonstration path.
+- **Onboarding:** Begin your journey from mission control, then play three short hands-on lessons. If you fail the slingshot lesson, the route solver draws a golden demonstration path.
 - **Feel:** procedural WebAudio, where pitch follows speed and a hum grows inside gravity wells. There are pooled particles, a dynamic camera, screen shake, haptics and slow motion on reveals.
 - **Accessibility:** UI scale, left-handed layout, high-contrast trajectory, reduced effects, assist mode, screen shake slider, haptics toggle and a choice of aim style.
 - **Save and resume:** the expedition is saved on every landing, and the profile is saved locally.
+
+## Visual presentation
+
+The mission-control hub features an illustrated ringed world and an orbiting survey probe. In flight, seeded spherical terrain, fixed sunlight and atmospheric rims give each planet depth. Gas-giant rings pass behind and in front of their planets; auroras, warp-gate arcs, gravity-well dust and destination markers animate independently of collision geometry.
+
+The survey craft has a directional hull, cockpit, charge indicator, luminous flight trail and thrust plume. Launches, landings and impacts add expanding shockwaves and spark trails. Nebula textures and planet surfaces are generated once and cached; particles remain pooled, and shockwaves have a fixed population limit. All artwork is procedural Canvas/CSS, with no external assets or runtime dependencies.
+
+The interface adapts to phone and desktop layouts. Reduced effects and the operating system's reduced-motion preference disable decorative UI motion, ambient orbital animation and camera shake, and lower the particle budget. Keyboard focus indicators remain visible throughout the menus.
 
 ## Architecture
 

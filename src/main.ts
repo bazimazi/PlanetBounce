@@ -8,7 +8,7 @@ import { AudioEngine } from './presentation/audio';
 import { Haptics } from './presentation/haptics';
 import { Renderer } from './presentation/renderer';
 import { buyTech } from './progression/progression';
-import { clearRun, loadProfile, loadRunJson, newProfile, saveProfile, type Profile } from './progression/profile';
+import { clearRun, loadProfile, loadRunJson, newProfile, saveProfile, type Profile, type Settings } from './progression/profile';
 import type { RunData } from './run/runState';
 import { UI, type AppApi } from './ui/ui';
 
@@ -23,15 +23,19 @@ class App implements AppApi {
   readonly ui: UI;
   private last = performance.now();
   private chain = 0;
+  private motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+  private presentationSettings: Settings;
 
   constructor(private canvas: HTMLCanvasElement, uiRoot: HTMLElement) {
     this.profile = loadProfile();
+    this.presentationSettings = this.profile.settings;
     this.game = new Game(this.profile);
-    this.renderer = new Renderer(canvas, this.game, () => this.profile.settings);
+    this.renderer = new Renderer(canvas, this.game, () => this.presentationSettings);
     this.ui = new UI(this, uiRoot);
     this.wire();
     this.bindInput();
     this.applySettings();
+    this.motionPreference.addEventListener('change', () => this.applySettings());
     this.onResize();
     window.addEventListener('resize', () => this.onResize());
     document.addEventListener('visibilitychange', () => {
@@ -42,11 +46,7 @@ class App implements AppApi {
         this.telemetry.flush();
       }
     });
-    if (!this.profile.tutorialDone) {
-      this.beginTutorial();
-    } else {
-      this.ui.showHub();
-    }
+    this.ui.showHub();
     requestAnimationFrame((t) => this.frame(t));
   }
 
@@ -141,11 +141,12 @@ class App implements AppApi {
 
   applySettings(): void {
     const s = this.profile.settings;
+    this.presentationSettings = { ...s, reducedEffects: s.reducedEffects || this.motionPreference.matches };
     this.audio.setVolumes(s.sfx, s.music);
     this.haptics.enabled = s.haptics;
-    this.game.camera.shakeScale = s.shake;
+    this.game.camera.shakeScale = this.presentationSettings.reducedEffects ? 0 : s.shake;
     this.telemetry.enabled = s.telemetry;
-    this.ui.applySettings(s);
+    this.ui.applySettings(this.presentationSettings);
     saveProfile(this.profile);
   }
 
@@ -257,11 +258,13 @@ class App implements AppApi {
       cam.shake(1.5 + power * 3);
       H.pulse(10 + Math.round(power * 15));
       this.renderer.resetTrail();
+      this.renderer.shockwave(e.x, e.y, '#9df4ff', 0.6 + power * 0.4);
       this.ui.setPrompt('');
       T.track('launch', { speed: Math.round(e.speed) });
     });
     ev.on('bounce', (e) => {
       A.bounce(e.speed);
+      this.renderer.shockwave(e.x, e.y, color(e.body), 0.55);
       P.burst(e.x, e.y, 10 + e.speed / 30, e.speed * 0.5, 0.6, 3.5, color(e.body), { additive: false });
       cam.shake(Math.min(8, e.speed / 60));
       H.pulse(12);
@@ -269,6 +272,7 @@ class App implements AppApi {
     ev.on('land', (e) => {
       const soft = e.speed < 55;
       A.land(this.chain++, soft);
+      this.renderer.shockwave(e.x, e.y, '#aeffe3', soft ? 0.6 : 1);
       P.burst(e.x, e.y, soft ? 12 : 22, 90, 0.8, 3.5, color(e.body), { additive: false, drag: 3 });
       P.ring(e.x, e.y, 6, 18, 60, 0.5, 2.5, '#e8fbff');
       cam.shake(soft ? 1 : 3);
@@ -299,6 +303,7 @@ class App implements AppApi {
     });
     ev.on('impact', (e) => {
       A.impact(e.damaged);
+      this.renderer.shockwave(e.x, e.y, e.damaged ? '#ff8b64' : '#ffdaa6', 1.2);
       P.burst(e.x, e.y, 26, 240, 0.6, 3.5, e.damaged ? '#ff7a5a' : '#ffd0a0');
       cam.shake(e.damaged ? 14 : 6);
       H.pulse(e.damaged ? [40, 30, 40] : 20);
@@ -310,6 +315,7 @@ class App implements AppApi {
     });
     ev.on('crash', (e) => {
       A.crash();
+      this.renderer.shockwave(e.x, e.y, '#ff9e73', 2);
       P.burst(e.x, e.y, 60, 320, 1.2, 5, '#ffb070');
       P.burst(e.x, e.y, 30, 160, 1.6, 3, '#ffffff');
       cam.shake(20);

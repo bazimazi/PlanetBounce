@@ -12,6 +12,7 @@ import { pickMemory, relativeTime, type Profile, type Settings } from '../progre
 import type { FailureReport } from '../run/analysis';
 import type { RunData } from '../run/runState';
 import { clear, h, setText } from './dom';
+import { observatory } from './observatory';
 
 /** What the UI can ask the app to do. */
 export interface AppApi {
@@ -331,14 +332,18 @@ export class UI {
     const regionBtns = unlockedRegions.map((r) => {
       const prog = p.regionProgress[r.id];
       const sub = prog?.completed ? 'Completed ✓' : prog ? `Best: sector ${prog.bestSector}/${r.sectors.length + 1}` : r.subtitle;
-      return this.btn(saved ? `New: ${r.name}` : `Launch · ${r.name}`, () => this.app.startRun(r.id), saved ? '' : 'primary', sub);
+      return this.btn(!p.tutorialDone ? 'Begin your journey' : saved ? `New: ${r.name}` : `Launch · ${r.name}`, () => !p.tutorialDone ? this.app.replayTutorial() : this.app.startRun(r.id), saved ? '' : 'primary', !p.tutorialDone ? 'Learn to fly. Find your first world.' : sub);
     });
     const lockedRegions = REGIONS.filter((r) => r.requires && !p.discoveries[r.requires]).map(() =>
       h('div', { class: 'locked-region' }, h('div', { class: 'lr-name' }, '??? ', h('span', null, 'Signal beyond the Inner Belt')), h('div', { class: 'lr-sub' }, 'Complete the Inner Belt to chart it')),
     );
     this.open(
       'hub',
-      h('div', { class: 'logo' }, h('div', { class: 'logo-orb' }), h('h1', null, 'PLANET', h('br'), 'BOUNCE')),
+      h('div', { class: 'hub-masthead' }, h('span', { class: 'brand-mark' }, '◈'), h('span', null, 'PLANET BOUNCE'), h('span', { class: 'online-status' }, 'EXPLORATION SYSTEMS ONLINE')),
+      observatory(),
+      h('div', { class: 'hub-console' },
+      h('div', { class: 'eyebrow' }, 'A GRAVITY-POWERED ODYSSEY'),
+      h('div', { class: 'logo' }, h('h1', null, 'Small probe.', h('br'), h('span', null, 'Infinite possibility.'))),
       memory ? h('p', { class: 'memory' }, memory) : h('p', { class: 'memory' }, 'Gravity is not an obstacle. It is your engine.'),
       h('div', { class: 'wallet' }, h('span', null, h('b', { class: 'gem' }, '◆ '), fmtInt(p.matter), ' matter'), h('span', null, h('b', { class: 'gem data' }, '◈ '), fmtInt(p.data), ' data')),
       h(
@@ -358,6 +363,8 @@ export class UI {
         ),
       ),
       p.stats.bestScore ? h('div', { class: 'foot' }, `Best score ${fmtInt(p.stats.bestScore)} · ${p.stats.runs} expeditions · top speed ${fmtInt(p.stats.bestSpeed)} u/s`) : null,
+      ),
+      h('div', { class: 'hub-footer' }, h('span', null, 'DRIFT. DISCOVER. GO FURTHER.'), h('span', null, 'Drag to launch · Let gravity lead')),
     );
   }
 
